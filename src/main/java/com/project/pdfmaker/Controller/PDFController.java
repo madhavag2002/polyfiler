@@ -108,37 +108,47 @@ public class PDFController {
    
 
     // Endpoint to convert images to a PDF using metadata keys from Redis
-    @GetMapping("/convert-images-to-pdf")
-    public ResponseEntity<String> convertImagesToPDF(@RequestParam("imageMetadataKeys") String[] imageMetadataKeys) {
+    @PostMapping(value = "/convert-images-to-pdf", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<List<String>> convertImagesToPDF(@RequestBody Map<String, Object> requestBody) {
         try {
+                ArrayList<String> eTags = (ArrayList<String>) requestBody.get("etags");
+
+
+
             // Get the metadata key for the generated PDF
-            String pdfMetadataKey = pdfService.convertImagesToPDF(imageMetadataKeys);
+            List<String> pdfMetadataKey = pdfService.convertImagesToPDF(eTags);
 
             // Return the metadata key for the PDF in the HTTP response
             return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_PLAIN_VALUE)
-                    .body("Generated PDF metadata key: " + pdfMetadataKey);
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .body(pdfMetadataKey);
 
-        } catch (IOException e) {
-            return ResponseEntity.internalServerError().body("Error converting images to PDF: " + e.getMessage());
+        } catch (IOException | InterruptedException e) {
+            return ResponseEntity.internalServerError().body(Collections.singletonList("Error converting images to PDF: " + e.getMessage()));
         }
     }
 
 
     // Endpoint to convert PDF to images using metadata key from Redis
-    @GetMapping("/convert-pdf-to-images")
-    public ResponseEntity<List<String>> convertPDFToImages(@RequestParam("pdfMetadataKey") String pdfMetadataKey) {
+    @PostMapping(value = "/convert-pdf-to-images", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<List<String>> convertPDFToImages(@RequestBody Map<String, Object> requestBody) {
         try {
-            // Get the list of image metadata keys from the PDFService
-            List<String> imageMetadataKeys = pdfService.convertPDFToImages(pdfMetadataKey);
 
-            // Return the metadata keys in the HTTP response body
+            ArrayList<String> eTags = (ArrayList<String>) requestBody.get("etags");
+            if (eTags.size() != 1) {
+                return ResponseEntity.badRequest().body(Collections.singletonList("Please provide only one eTag"));
+            }
+
+            // Get the list of image metadata keys from the PDFService
+            List<String> imageMetadataKeys = pdfService.convertPDFToImages(eTags);
+
+            // Return the list of image metadata keys in the HTTP response
             return ResponseEntity.ok()
                     .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                     .body(imageMetadataKeys);
 
-        } catch (IOException e) {
-            return ResponseEntity.internalServerError().body(null);
+        } catch (IOException | InterruptedException e) {
+            return ResponseEntity.internalServerError().body(Collections.singletonList("Error converting PDF to images: " + e.getMessage()));
         }
     }
 

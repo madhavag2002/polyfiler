@@ -311,28 +311,30 @@ public class PDFService {
 
     
         // Method to convert images to PDF and save the PDF to the volume
-        public String convertImagesToPDF(String[] imageMetadataKeys) throws IOException {
-            // Define the upload path for saving the generated PDF
-            Path uploadPath = Paths.get("/data/pdf-uploads/");
-            if (!Files.exists(uploadPath)) {
-                Files.createDirectories(uploadPath);
-            }
-    
-            // Generate a unique name for the output PDF file
-            String pdfFileName = "images_" + System.currentTimeMillis() + ".pdf";
-            String pdfFilePath = uploadPath.toString() + "/" + pdfFileName;
+    public List<String> convertImagesToPDF(List<String> eTags) throws IOException, InterruptedException {
+
+            List<String> outputeTag = new ArrayList<>();
+
+            String newUuid = UUID.randomUUID().toString();
+            String pdfFileName = newUuid + ".pdf";
+            String pdfFilePath = path + "/" + pdfFileName;
+            //String metadata_string = redisTemplate.opsForValue().get(eTags.get(0));
+            //FileMetadata fileMetaData1 = objectMapper.readValue(metadata_string, FileMetadata.class);
+           // String pdfFileName = fileMetaData1.getName().substring(0, fileMetaData1.getName().lastIndexOf('.')) + "_Combined.pdf";
+
+
+
     
             // Initialize the PDF document
             PdfWriter pdfWriter = new PdfWriter(pdfFilePath);
             PdfDocument pdfDoc = new PdfDocument(pdfWriter);
             try (Document document = new Document(pdfDoc)) {
                 // Loop through metadata keys, fetch image file paths from Redis, and add images to the PDF
-                for (String metadataKey : imageMetadataKeys) {
-                    String imagePath = redisTemplate.opsForValue().get(metadataKey);
-   
-                    if (imagePath == null || imagePath.isEmpty()) {
-                        throw new IOException("Image metadata not found for key: " + metadataKey);
-                    }
+                for (String etag : eTags) {
+                    String metadata_string = redisTemplate.opsForValue().get(etag);
+                    FileMetadata fileMetaData = objectMapper.readValue(metadata_string, FileMetadata.class);
+
+                    String imagePath = path + fileMetaData.getPath();
    
                     File imageFile = new File(imagePath);
                     if (!imageFile.exists()) {
@@ -343,63 +345,116 @@ public class PDFService {
                     Image img = new Image(ImageDataFactory.create(imagePath));
                     document.add(img);
                 }
-   
-                document.close();
+
             }
     
-            // Store the generated PDF file path in Redis (e.g., key: "pdf_from_images:timestamp")
-            String pdfMetadataKey = "pdf_from_images:" + System.currentTimeMillis();
-            redisTemplate.opsForValue().set(pdfMetadataKey, pdfFilePath);
-    
-            return pdfMetadataKey;
-        }
+            // Store the path of the generated PDF in Redis
 
-            // Method to convert PDF pages to images and save the images to the volume
-            public List<String> convertPDFToImages(String pdfMetadataKey) throws IOException {
-                // Fetch file path from Redis using the metadata key
-                String pdfFilePath = redisTemplate.opsForValue().get(pdfMetadataKey);
+            UploadFileInternalRequest uploadFileInternalRequest = new UploadFileInternalRequest();
+            uploadFileInternalRequest.setPath(pdfFilePath);
+            uploadFileInternalRequest.setName(pdfFileName);
+            uploadFileInternalRequest.setOwner("owner");
+            uploadFileInternalRequest.setUuid(newUuid);
+            uploadFileInternalRequest.setHash("hash");
+            uploadFileInternalRequest.setSize(1234);//any non-zero value should work as download handler doesnt actually check the size
+
+            String uploadFileInternalRequestJson = objectMapper.writeValueAsString(uploadFileInternalRequest);
+            System.out.println("uploadFileInternalRequestJson: " + uploadFileInternalRequestJson);
+            //Send POST request to the internal API to upload the merged PDF
+
+            String url = System.getenv("FILE_MICROSERVICE") + "/upload/internal";
+            HttpClient httpclient = HttpClientConfig.getClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(uploadFileInternalRequestJson))
+                    .build();
+            HttpResponse<String> response = httpclient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            System.out.println("Response code: " + response.statusCode());
+            System.out.println("Response body: " + response.body());
+            if (response.statusCode() != 200) {
+                throw new IOException("Error uploading converted PDF to file microservice");
+            }
+
+            outputeTag.add(newUuid);
+    
+            return outputeTag;
+
+    }
+
+    // Method to convert PDF pages to images and save the images to the volume
+    public List<String> convertPDFToImages(List<String> eTags) throws IOException, InterruptedException {
+
+
+        String metadata_string = redisTemplate.opsForValue().get(eTags.get(0));
+        FileMetadata fileMetaData = objectMapper.readValue(metadata_string, FileMetadata.class);
+        String pdfFilePath = path+fileMetaData.getPath();
+
+
+
+            if (!pdfFilePath.contains(".pdf")) {
+                    throw new IOException("File metadata not found for key: " + eTags.get(0));
+            }
         
-                if (pdfFilePath == null || pdfFilePath.isEmpty()) {
-                    throw new IOException("File metadata not found for key: " + pdfMetadataKey);
-                }
-        
-                File pdfFile = new File(pdfFilePath);
-                if (!pdfFile.exists()) {
+            File pdfFile = new File(pdfFilePath);
+            if (!pdfFile.exists()) {
                     throw new IOException("PDF file not found on the volume: " + pdfFilePath);
-                }
+            }
         
                 // Load PDF document
                 PDDocument pdfDocument = PDDocument.load(pdfFile);
                 PDFRenderer pdfRenderer = new PDFRenderer(pdfDocument);
         
-                // Define the path for saving images
-                Path uploadPath = Paths.get("/data/image-uploads/");
-                if (!Files.exists(uploadPath)) {
-                    Files.createDirectories(uploadPath);
-                }
-        
                 // List to store metadata keys for the generated images
-                List<String> imageMetadataKeys = new ArrayList<>();
+                List<String> imgEtags = new ArrayList<>();
         
                 // Loop through each page in the PDF and convert to image
                 for (int page = 0; page < pdfDocument.getNumberOfPages(); page++) {
                     BufferedImage image = pdfRenderer.renderImageWithDPI(page, 300, ImageType.RGB);
         
-                    // Generate a unique name for each image
-                    String imageFileName = "page_" + (page + 1) + "_" + System.currentTimeMillis() + ".png";
-                    String imageFilePath = uploadPath.toString() + "/" + imageFileName;
+                    String newUuid = UUID.randomUUID().toString();
+                    String imageFileName = newUuid + ".png";
+                    String imageFilePath = path + "/" + imageFileName;
         
                     // Save image to the specified path
                     ImageIO.write(image, "PNG", new File(imageFilePath));
         
-                    // Store image file path in Redis
-                    String imageMetadataKey = "image_from_pdf:" + System.currentTimeMillis() + "_" + page;
-                    redisTemplate.opsForValue().set(imageMetadataKey, imageFilePath);
-                    imageMetadataKeys.add(imageMetadataKey);
+
+                    UploadFileInternalRequest uploadFileInternalRequest = new UploadFileInternalRequest();
+                    uploadFileInternalRequest.setPath(newUuid+ ".png");
+                    uploadFileInternalRequest.setName(fileMetaData.getName().substring(0, fileMetaData.getName().lastIndexOf('.')) + "_page_" + (page + 1) + ".png");
+                    uploadFileInternalRequest.setOwner(fileMetaData.getOwner());
+                    uploadFileInternalRequest.setUuid(newUuid);
+                    uploadFileInternalRequest.setHash("hash");
+                    uploadFileInternalRequest.setSize(1234);//any non-zero value should work as download handler doesnt actually check the size
+
+                    String uploadFileInternalRequestJson = objectMapper.writeValueAsString(uploadFileInternalRequest);
+                    System.out.println("uploadFileInternalRequestJson: " + uploadFileInternalRequestJson);
+                    //Send POST request to the internal API to upload the merged PDF
+
+                    String url = System.getenv("FILE_MICROSERVICE") + "/upload/internal";
+                    HttpClient httpclient = HttpClientConfig.getClient();
+                    HttpRequest request = HttpRequest.newBuilder()
+                            .uri(java.net.URI.create(url))
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString(uploadFileInternalRequestJson))
+                            .build();
+                    HttpResponse<String> response = httpclient.send(request, HttpResponse.BodyHandlers.ofString());
+
+                    System.out.println("Response code: " + response.statusCode());
+                    System.out.println("Response body: " + response.body());
+                    if (response.statusCode() != 200) {
+                        throw new IOException("Error uploading converted PDF to file microservice");
+                    }
+                    imgEtags.add(newUuid);
+
+
+
                 }
         
                 pdfDocument.close();
-                return imageMetadataKeys;
+                return imgEtags;
             }
 
            
