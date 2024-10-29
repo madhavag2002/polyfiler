@@ -1,8 +1,14 @@
 package com.project.pdfmaker.Service;
 
+import com.project.pdfmaker.Service.FileMetadata;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.itextpdf.io.image.ImageDataFactory;
 import com.itextpdf.kernel.utils.PdfMerger;
+import com.project.pdfmaker.config.HttpClientConfig;
+import lombok.Getter;
+import lombok.Setter;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -17,14 +23,20 @@ import com.itextpdf.layout.element.Image;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.ImageType;
 import org.apache.pdfbox.rendering.PDFRenderer;
+import org.springframework.web.client.RestTemplate;
+
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.*;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class PDFService {
@@ -32,8 +44,13 @@ public class PDFService {
     @Autowired
     private StringRedisTemplate redisTemplate;
 
+    @Value("${pdf.storage.path}")
+    String path;
+
+    private ObjectMapper objectMapper = new ObjectMapper();
+
     // Method to merge multiple PDFs and save the merged PDF to the volume
-    public String mergePDFsFromVolume(String[] metadataKeys) throws IOException {
+    public List<String> mergePDFsFromVolume(ArrayList<String> etags ) throws IOException, InterruptedException {
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
 
         // Initialize the merged PDF document
@@ -41,13 +58,28 @@ public class PDFService {
         PdfDocument mergedPdfDoc = new PdfDocument(pdfWriter);
         PdfMerger pdfMerger = new PdfMerger(mergedPdfDoc);
 
-        // Loop through metadata keys, fetch file paths from Redis, and merge the PDFs
-        for (String metadataKey : metadataKeys) {
-            // Fetch file path from Redis using the metadata key
-            String filePath = redisTemplate.opsForValue().get(metadataKey);
+        String first_etag_name = null;
+        String first_etag_owner = null;
 
-            if (filePath == null || filePath.isEmpty()) {
-                throw new IOException("File metadata not found for key: " + metadataKey);
+        // Loop through metadata keys, fetch file paths from Redis, and merge the PDFs
+        for (String etag : etags) {
+            // Fetch file path from Redis using the metadata key
+            String metadata_string = redisTemplate.opsForValue().get(etag);
+            System.out.println(" metadata_string: " + metadata_string);
+
+            FileMetadata fileMetaData = objectMapper.readValue(metadata_string, FileMetadata.class);
+            System.out.println(" fileMetaData: " + fileMetaData);
+            System.out.println(" fileMetaData.getPath(): " + fileMetaData.getPath());
+            System.out.println(" fileMetaData.getName(): " + fileMetaData.getName());
+            String filePath=path+fileMetaData.getPath();
+            if (!filePath.contains(".pdf")) {
+                throw new IOException("File metadata not found for key: " );
+            }
+            if (first_etag_name == null) {
+                first_etag_name = fileMetaData.getName();
+            }
+            if (first_etag_owner == null) {
+                first_etag_owner = fileMetaData.getOwner();
             }
 
             // Access the file from the volume using the file path
@@ -63,40 +95,81 @@ public class PDFService {
             }
         }
 
+        assert first_etag_name != null;
+        String first_etag_name_without_extension = first_etag_name.substring(0, first_etag_name.lastIndexOf('.'));
+
         mergedPdfDoc.close();
 
-        // Define the upload path for saving the merged PDF
-        Path uploadPath = Paths.get("/data/pdf-uploads/");
-        if (!Files.exists(uploadPath)) {
-            Files.createDirectories(uploadPath);
-        }
+       String newUuid = UUID.randomUUID().toString();
 
         // Generate a unique file name for the merged PDF
-        String mergedFileName = "merged_" + System.currentTimeMillis() + ".pdf";
-        String filePath = uploadPath.toString() + "/" + mergedFileName;
+        String mergedFileName = newUuid+ ".pdf";
+        String filePath = path + "/" + mergedFileName;
 
         // Save the merged PDF to the specified path
         try (FileOutputStream fos = new FileOutputStream(filePath)) {
             fos.write(outputStream.toByteArray());
         }
 
-        // Store the merged PDF file path in Redis (e.g., key: "merged_file:123", value:
-        // file path)
-        String metadataKey = "merged_file:" + System.currentTimeMillis();
-        redisTemplate.opsForValue().set(metadataKey, filePath);
+        UploadFileInternalRequest uploadFileInternalRequest = new UploadFileInternalRequest();
+        uploadFileInternalRequest.setPath(filePath);
+        uploadFileInternalRequest.setName(first_etag_name_without_extension + "_merged.pdf");
+        uploadFileInternalRequest.setOwner(first_etag_owner);
+        uploadFileInternalRequest.setUuid(newUuid);
+        uploadFileInternalRequest.setHash("hash");
+        uploadFileInternalRequest.setSize(outputStream.size());
 
-        return "Merged PDF file saved successfully. Metadata key: " + metadataKey;
+        String uploadFileInternalRequestJson = objectMapper.writeValueAsString(uploadFileInternalRequest);
+        System.out.println("uploadFileInternalRequestJson: " + uploadFileInternalRequestJson);
+        //Send POST request to the internal API to upload the merged PDF
+        //_, err = http.Post(os.Getenv("FILE_MICROSERVICE")+"/upload/internal", "application/json", bytes.NewReader(payloadBytes))
+
+
+        String url = System.getenv("FILE_MICROSERVICE") + "/upload/internal";
+        HttpClient httpclient = HttpClientConfig.getClient();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(java.net.URI.create(url))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(uploadFileInternalRequestJson))
+                .build();
+        HttpResponse<String> response = httpclient.send(request, HttpResponse.BodyHandlers.ofString());
+
+
+        System.out.println("Response code: " + response.statusCode());
+        System.out.println("Response body: " + response.body());
+
+        ArrayList<String> mergedMetadataKeys = new ArrayList<>();
+        mergedMetadataKeys.add(newUuid);
+        return mergedMetadataKeys;
+
+
+
+
+
+        // Store the merged PDF file path in Redis (e.g., key: "merged_file:123", value:
+//        // file path)
+//        String metadataKey = "merged_file:" + System.currentTimeMillis();
+//        redisTemplate.opsForValue().set(metadataKey, filePath);
     }
 
     // method to split pdfs
-    public List<String> splitPDF(String metadataKey) throws IOException {
-        // Retrieve the file path from Redis using the metadata key
-        String filePath = redisTemplate.opsForValue().get(metadataKey);
+    public List<String> splitPDF(ArrayList<String> etags) throws IOException {
 
-        if (filePath == null || filePath.isEmpty()) {
-            throw new IOException("File metadata not found for key: " + metadataKey);
+        if (etags.size()!=1) {
+            throw new IOException("Only one PDF can be split at a time");
         }
+        String metadata_string = redisTemplate.opsForValue().get(etags.get(0));
+        System.out.println(" metadata_string: " + metadata_string);
 
+        FileMetadata fileMetaData = objectMapper.readValue(metadata_string, FileMetadata.class);
+        System.out.println(" fileMetaData: " + fileMetaData);
+        System.out.println(" fileMetaData.getPath(): " + fileMetaData.getPath());
+        System.out.println(" fileMetaData.getName(): " + fileMetaData.getName());
+        String filePath=path+fileMetaData.getPath();
+        if (!filePath.contains(".pdf")) {
+            throw new IOException("File metadata not found for key, or file was not a PDF" );
+        }
+        // Retrieve the file path from Redis using the metadata key
         File pdfFile = new File(filePath);
         if (!pdfFile.exists()) {
             throw new IOException("File not found on the volume: " + filePath);
@@ -108,15 +181,18 @@ public class PDFService {
             int totalPages = pdfDoc.getNumberOfPages();
 
             // Define the upload path for saving split PDFs
-            Path uploadPath = Paths.get("/data/pdf-uploads/");
-            if (!Files.exists(uploadPath)) {
-                Files.createDirectories(uploadPath);
-            }
+//            Path uploadPath = Paths.get("/data/pdf-uploads/");
+//            if (!Files.exists(uploadPath)) {
+//                Files.createDirectories(uploadPath);
+//            }
 
             // Split each page into its own PDF
             for (int i = 1; i <= totalPages; i++) {
-                String splitFileName = "split_" + System.currentTimeMillis() + "_page" + i + ".pdf";
-                String splitFilePath = uploadPath.toString() + "/" + splitFileName;
+                String newUuid = UUID.randomUUID().toString();
+
+                // Generate a unique file name for the merged PDF
+                String mergedFileName = newUuid+ ".pdf";
+                String splitFilePath = path + "/" + mergedFileName;
 
                 try (PdfWriter writer = new PdfWriter(splitFilePath)) {
                     PdfDocument singlePagePdf = new PdfDocument(writer);
@@ -124,55 +200,109 @@ public class PDFService {
                     singlePagePdf.close();
                 }
 
-                // Store the path of the split PDF in Redis
-                String splitMetadataKey = "split_file:" + System.currentTimeMillis() + "_page" + i;
-                redisTemplate.opsForValue().set(splitMetadataKey, splitFilePath);
-                splitMetadataKeys.add(splitMetadataKey);
+                UploadFileInternalRequest uploadFileInternalRequest = new UploadFileInternalRequest();
+                uploadFileInternalRequest.setPath(splitFilePath);
+                uploadFileInternalRequest.setName(fileMetaData.getName().substring(0, fileMetaData.getName().lastIndexOf('.')) + "_page_" + i + ".pdf");
+                uploadFileInternalRequest.setOwner(fileMetaData.getOwner());
+                uploadFileInternalRequest.setUuid(newUuid);
+                uploadFileInternalRequest.setHash("hash");
+                uploadFileInternalRequest.setSize(1234);//any non-zero value should work as download handler doesnt actually check the size
+
+                String uploadFileInternalRequestJson = objectMapper.writeValueAsString(uploadFileInternalRequest);
+                System.out.println("uploadFileInternalRequestJson: " + uploadFileInternalRequestJson);
+                //Send POST request to the internal API to upload the merged PDF
+
+                String url = System.getenv("FILE_MICROSERVICE") + "/upload/internal";
+                HttpClient httpclient = HttpClientConfig.getClient();
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(java.net.URI.create(url))
+                        .header("Content-Type", "application/json")
+                        .POST(HttpRequest.BodyPublishers.ofString(uploadFileInternalRequestJson))
+                        .build();
+                HttpResponse<String> response = httpclient.send(request, HttpResponse.BodyHandlers.ofString());
+
+                System.out.println("Response code: " + response.statusCode());
+                System.out.println("Response body: " + response.body());
+                if (response.statusCode() != 200) {
+                    throw new IOException("Error uploading split PDF to file microservice");
+                }
+                splitMetadataKeys.add(newUuid);
+
+
             }
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
         }
         return splitMetadataKeys; // Return list of metadata keys for split PDFs
     }
 
     // Method to compress a PDF and save the compressed PDF to the volume
-    public String compressPDF(String metadataKey , float compressionQuality) throws IOException {
+    public List<String> compressPDF(List<String> eTags , float compressionQuality) throws IOException, InterruptedException {
         // Retrieve file path from Redis using metadata key
-        String originalFilePath = redisTemplate.opsForValue().get(metadataKey);
+        //String originalFilePath = redisTemplate.opsForValue().get(metadataKey);
+        List<String> outputeTag = new ArrayList<>();
+        for (String eTag:eTags){
+            String metadata_string = redisTemplate.opsForValue().get(eTag);
+            FileMetadata fileMetaData = objectMapper.readValue(metadata_string, FileMetadata.class);
+            String filePath=path+fileMetaData.getPath();
 
-        if (originalFilePath == null || originalFilePath.isEmpty()) {
-            throw new IOException("File metadata not found for key: " + metadataKey);
+            if (!filePath.contains(".pdf")) {
+                throw new IOException("File metadata not found for key: " );
+            }
+
+            // Access the file from the volume using the file path
+            File originalFile = new File(filePath);
+            if (!originalFile.exists()) {
+                throw new IOException("File not found on the volume: " + filePath);
+            }
+
+            // Define the path to save the compressed PDF
+            String newUuid = UUID.randomUUID().toString();
+            String compressedFileName = newUuid + ".pdf";
+            String compressedFilePath = path + "/" + compressedFileName;
+
+            try (PdfDocument originalPdf = new PdfDocument(new PdfReader(filePath));
+                 PdfWriter writer = new PdfWriter(compressedFilePath, new WriterProperties().setCompressionLevel((int)(compressionQuality * 9)));
+                 PdfDocument compressedPdf = new PdfDocument(writer)) {
+
+                // Copy pages from the original PDF to the compressed PDF
+                originalPdf.copyPagesTo(1, originalPdf.getNumberOfPages(), compressedPdf);
+            }
+
+            UploadFileInternalRequest uploadFileInternalRequest = new UploadFileInternalRequest();
+            uploadFileInternalRequest.setPath(newUuid+ ".pdf");
+            uploadFileInternalRequest.setName(fileMetaData.getName().substring(0, fileMetaData.getName().lastIndexOf('.')) + "_compressed.pdf");
+            uploadFileInternalRequest.setOwner(fileMetaData.getOwner());
+            uploadFileInternalRequest.setUuid(newUuid);
+            uploadFileInternalRequest.setHash("hash");
+            uploadFileInternalRequest.setSize(1234);//any non-zero value should work as download handler doesnt actually check the size
+
+            String uploadFileInternalRequestJson = objectMapper.writeValueAsString(uploadFileInternalRequest);
+            System.out.println("uploadFileInternalRequestJson: " + uploadFileInternalRequestJson);
+            //Send POST request to the internal API to upload the merged PDF
+
+            String url = System.getenv("FILE_MICROSERVICE") + "/upload/internal";
+
+            HttpClient httpclient = HttpClientConfig.getClient();
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(uploadFileInternalRequestJson))
+                    .build();
+            HttpResponse<String> response = httpclient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            System.out.println("Response code: " + response.statusCode());
+            System.out.println("Response body: " + response.body());
+            if (response.statusCode() != 200) {
+                throw new IOException("Error uploading compressed PDF to file microservice");
+            }
+            outputeTag.add(newUuid);
+
         }
 
-        // Access the file from the volume using the file path
-        File originalFile = new File(originalFilePath);
-        if (!originalFile.exists()) {
-            throw new IOException("File not found on the volume: " + originalFilePath);
-        }
 
-        // Define the path to save the compressed PDF
-        Path uploadPath = Paths.get("/data/pdf-uploads/");
-        if (!Files.exists(uploadPath)) {
-            Files.createDirectories(uploadPath);
-        }
-
-        // Generate a unique name for the compressed PDF file
-        String compressedFileName = "compressed_" + System.currentTimeMillis() + ".pdf";
-        String compressedFilePath = uploadPath.toString() + "/" + compressedFileName;
-
-        // Compress and save the PDF
-        try (PdfDocument originalPdf = new PdfDocument(new PdfReader(originalFilePath));
-                PdfWriter writer = new PdfWriter(compressedFilePath, new WriterProperties().setCompressionLevel((int)(compressionQuality * 9)));
-                PdfDocument compressedPdf = new PdfDocument(writer)) {
-
-            // Copy pages from the original PDF to the compressed PDF
-            originalPdf.copyPagesTo(1, originalPdf.getNumberOfPages(), compressedPdf);
-        }
-
-        // Store the compressed file path in Redis (e.g., key:
-        // "compressed_file:timestamp")
-        String compressedMetadataKey = "compressed_file:" + System.currentTimeMillis();
-        redisTemplate.opsForValue().set(compressedMetadataKey, compressedFilePath);
-
-        return compressedMetadataKey;
+        return outputeTag;
     }
 
 
@@ -413,9 +543,29 @@ public class PDFService {
 }
 
 
-        
-    
-    
-    
 
 
+
+
+
+
+//type UploadFileInternalRequest struct {
+//    Size  int64  `json:"size"`
+//    Name  string `json:"name"`
+//    HASH  string `json:"hash"`
+//    Owner string `json:"owner"`
+//    UUID  string `json:"uuid"`
+//    Path  string `json:"path"`
+//}
+
+@Getter
+@Setter
+class UploadFileInternalRequest {
+    private long size;
+    private String name;
+    private String hash;
+    private String owner;
+    private String uuid;
+    private String path;
+
+}

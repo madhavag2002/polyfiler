@@ -1,14 +1,15 @@
 package com.project.pdfmaker.Controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import com.project.pdfmaker.Service.PDFService;
-import java.util.List;
-import java.util.StringJoiner;
+
+import java.util.*;
 
 import java.io.IOException;
 
@@ -19,61 +20,87 @@ public class PDFController {
     @Autowired
     private PDFService pdfService;
 
+    @Value("${pdf.storage.path}")
+    String path;
+
     // Endpoint to merge multiple PDFs using metadata keys from Redis
-    @GetMapping("/merge")
-    public ResponseEntity<String> mergePDFsFromVolume(@RequestParam("metadataKeys") String[] metadataKeys) {
+    @PostMapping(value = "/merge", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<List<String>> mergePDFsFromVolume(@RequestBody Map<String, Object> requestBody) {
         try {
             // Get the Redis metadata key from the PDFService
-            String metadataKey = pdfService.mergePDFsFromVolume(metadataKeys);
+            System.out.println(path);
+        System.out.println(requestBody);
+        System.out.println(requestBody.get("etaasfsgs"));
+        System.out.println(requestBody.get("etags").getClass().getName());
+            //String[] eTags = (String[]) requestBody.get("etags");
+        ArrayList<String> eTags = (ArrayList<String>) requestBody.get("etags");
+            System.out.println(eTags);
+        System.out.println(eTags.size());
+        System.out.println(eTags.get(0));
+            List<String> outputeTag = pdfService.mergePDFsFromVolume(eTags);
 
-            // Return the metadata key in the HTTP response body
+            // Return the outputeTag as json array
             return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_PLAIN_VALUE)
-                    .body("Merged PDF metadata key: " + metadataKey);
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .body(outputeTag);
 
-        } catch (IOException e) {
-            return ResponseEntity.internalServerError().body("Error merging PDFs: " + e.getMessage());
+//            return ResponseEntity.ok()
+//                    .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_PLAIN_VALUE)
+//                    .body("Merged PDF metadata key: " + metadataKey);
+
         }
+       catch (IOException | InterruptedException e) {
+           return ResponseEntity.internalServerError().body(Collections.singletonList("Error merging PDFs: " + e.getMessage()));
+      }
     }
 
     // Endpoint to split a PDF into single pages and return a list of metadata keys
     // as plain text
-    @GetMapping("/split")
-    public ResponseEntity<String> splitPDF(@RequestParam("metadataKey") String metadataKey) {
+    @PostMapping(value = "/split", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<List<String>> splitPDF(@RequestBody Map<String, Object> requestBody) {
         try {
-            List<String> splitMetadataKeys = pdfService.splitPDF(metadataKey);
 
-            // Convert list of metadata keys to a comma-separated string
-            StringJoiner joiner = new StringJoiner(", ");
-            for (String key : splitMetadataKeys) {
-                joiner.add(key);
-            }
-            String result = joiner.toString();
+            System.out.println(path);
+            System.out.println(requestBody);
+            System.out.println(requestBody.get("etaasfsgs"));
+            System.out.println(requestBody.get("etags").getClass().getName());
+            //String[] eTags = (String[]) requestBody.get("etags");
+            ArrayList<String> eTags = (ArrayList<String>) requestBody.get("etags");
+            System.out.println(eTags);
+            System.out.println(eTags.size());
+            System.out.println(eTags.get(0));
 
+
+            List<String> splitMetadataKeys = pdfService.splitPDF(eTags);
+
+
+            // Return the metadata keys in the HTTP response body
             return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_PLAIN_VALUE)
-                    .body(result);
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .body(splitMetadataKeys);
 
         } catch (IOException e) {
-            return ResponseEntity.internalServerError().body("Error splitting PDF: " + e.getMessage());
+            return ResponseEntity.internalServerError().body(Collections.singletonList("Error splitting PDF: " + e.getMessage()));
         }
     }
 
     // Endpoint to compress a PDF using its metadata key from Redis
-    @GetMapping("/compress")
-    public ResponseEntity<String> compressPDF(@RequestParam("metadataKey") String metadataKey,
-    @RequestParam("compression") float compressionQuality) {
+    @PostMapping(value = "/compress", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<List<String>>  compressPDF(@RequestBody Map<String, Object> requestBody) {
         try {
+            //String[] eTags = (String[]) requestBody.get("etags");
+            ArrayList<String> eTags = (ArrayList<String>) requestBody.get("etags");
+            Float compressionQuality = (Float) requestBody.get("compressionQuality");
             // Get the metadata key of the compressed PDF
-            String compressedMetadataKey = pdfService.compressPDF(metadataKey,compressionQuality);
+            List<String> compressedMetadataKey = pdfService.compressPDF(eTags,compressionQuality);
 
             // Return the metadata key for the compressed PDF
             return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_PLAIN_VALUE)
-                    .body("Compressed PDF metadata key: " + compressedMetadataKey);
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .body(compressedMetadataKey);
 
-        } catch (IOException e) {
-            return ResponseEntity.internalServerError().body("Error compressing PDF: " + e.getMessage());
+        } catch (IOException | InterruptedException e) {
+            return ResponseEntity.internalServerError().body(Collections.singletonList("Error compressing PDF: " + e.getMessage()));
         }
     }
 
