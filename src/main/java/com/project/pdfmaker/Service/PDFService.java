@@ -389,7 +389,7 @@ public class PDFService {
 
         String metadata_string = redisTemplate.opsForValue().get(eTags.get(0));
         FileMetadata fileMetaData = objectMapper.readValue(metadata_string, FileMetadata.class);
-        String pdfFilePath = path+fileMetaData.getPath();
+        String pdfFilePath = path+"/"+fileMetaData.getPath();
 
 
 
@@ -433,7 +433,7 @@ public class PDFService {
                     System.out.println("uploadFileInternalRequestJson: " + uploadFileInternalRequestJson);
                     //Send POST request to the internal API to upload the merged PDF
 
-                    String url = System.getenv("FILE_MICROSERVICE") + "/upload/internal";
+                    String url = "http://localhost:3000" + "/upload/internal";
                     HttpClient httpclient = HttpClientConfig.getClient();
                     HttpRequest request = HttpRequest.newBuilder()
                             .uri(java.net.URI.create(url))
