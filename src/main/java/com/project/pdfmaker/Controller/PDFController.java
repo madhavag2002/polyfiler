@@ -14,7 +14,7 @@ import java.util.*;
 import java.io.IOException;
 
 @RestController
-@RequestMapping("/api/pdf")
+@RequestMapping("/")
 public class PDFController {
 
     @Autowired
@@ -155,23 +155,27 @@ public class PDFController {
     
 
     // Endpoint to add a watermark to a PDF and return the metadata key of the watermarked PDF
-    @GetMapping("/add-watermark")
-    public ResponseEntity<String> addWatermarkToPDF(
-            @RequestParam("pdfMetadataKey") String pdfMetadataKey,
-            @RequestParam("watermarkText") String watermarkText,
-            @RequestParam("opacity") float opacity,
-            @RequestParam("position") String position) {
+    @PostMapping(value = "/add-watermark", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<List<String>> addWatermarkToPDF(@RequestBody Map<String, Object> requestBody) {
         try {
+            ArrayList<String> eTags = (ArrayList<String>) requestBody.get("etags");
+            String watermarkText = (String) requestBody.get("watermarkText");
+            Float opacity = (Float) requestBody.get("opacity");
+            String position = (String) requestBody.get("position");
+            float fontSize = (Float) requestBody.get("fontSize");
+            float angle = (Float) requestBody.get("angle");
+
+
             // Call the service method with additional parameters for opacity and position
-            String watermarkedMetadataKey = pdfService.addWatermarkToPDF(pdfMetadataKey, watermarkText, opacity, position);
+            List<String> watermarkedMetadataKey = pdfService.addWatermarkToPDF(eTags, watermarkText, opacity, position, fontSize, angle);
 
             // Return the metadata key in the HTTP response body
             return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_PLAIN_VALUE)
-                    .body("Watermarked PDF metadata key: " + watermarkedMetadataKey);
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .body(watermarkedMetadataKey);
 
-        } catch (IOException e) {
-            return ResponseEntity.internalServerError().body("Error adding watermark to PDF: " + e.getMessage());
+        } catch (IOException | InterruptedException e) {
+            return ResponseEntity.internalServerError().body(Collections.singletonList("Error adding watermark to PDF: " + e.getMessage()));
         }
     }
     

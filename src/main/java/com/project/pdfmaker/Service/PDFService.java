@@ -66,12 +66,12 @@ public class PDFService {
             // Fetch file path from Redis using the metadata key
             String metadata_string = redisTemplate.opsForValue().get(etag);
             System.out.println(" metadata_string: " + metadata_string);
-
+            System.out.println(fileMicroservice);
             FileMetadata fileMetaData = objectMapper.readValue(metadata_string, FileMetadata.class);
             System.out.println(" fileMetaData: " + fileMetaData);
             System.out.println(" fileMetaData.getPath(): " + fileMetaData.getPath());
             System.out.println(" fileMetaData.getName(): " + fileMetaData.getName());
-            String filePath=path+fileMetaData.getPath();
+            String filePath=path+"/"+fileMetaData.getPath();
             if (!filePath.contains(".pdf")) {
                 throw new IOException("File metadata not found for key: " );
             }
@@ -165,7 +165,7 @@ public class PDFService {
         System.out.println(" fileMetaData: " + fileMetaData);
         System.out.println(" fileMetaData.getPath(): " + fileMetaData.getPath());
         System.out.println(" fileMetaData.getName(): " + fileMetaData.getName());
-        String filePath=path+fileMetaData.getPath();
+        String filePath=path+"/"+fileMetaData.getPath();
         if (!filePath.contains(".pdf")) {
             throw new IOException("File metadata not found for key, or file was not a PDF" );
         }
@@ -244,7 +244,7 @@ public class PDFService {
         for (String eTag:eTags){
             String metadata_string = redisTemplate.opsForValue().get(eTag);
             FileMetadata fileMetaData = objectMapper.readValue(metadata_string, FileMetadata.class);
-            String filePath=path+fileMetaData.getPath();
+            String filePath=path+"/"+fileMetaData.getPath();
 
             if (!filePath.contains(".pdf")) {
                 throw new IOException("File metadata not found for key: " );
@@ -465,85 +465,109 @@ public class PDFService {
 
 
     // Method to add a watermark to a PDF with customizable opacity and position, saving the edited PDF to the volume
-    public String addWatermarkToPDF(String pdfMetadataKey, String watermarkText, float opacity, String position) throws IOException {
-        // Retrieve the file path of the original PDF from Redis using the metadata key
-        String originalPdfPath = redisTemplate.opsForValue().get(pdfMetadataKey);
+    public List<String> addWatermarkToPDF(List<String> eTags, String watermarkText, float opacity, String position, float fontSize, float angle) throws IOException, InterruptedException {
 
-        if (originalPdfPath == null || originalPdfPath.isEmpty()) {
-            throw new IOException("File metadata not found for key: " + pdfMetadataKey);
-        }
+        List<String> outputeTags = new ArrayList<>();
 
-        File originalPdfFile = new File(originalPdfPath);
-        if (!originalPdfFile.exists()) {
-            throw new IOException("File not found on the volume: " + originalPdfPath);
-        }
+        for (String eTag:eTags) {
 
-        // Define the path for saving the watermarked PDF
-        Path uploadPath = Paths.get("/data/pdf-uploads/");
-        if (!Files.exists(uploadPath)) {
-            Files.createDirectories(uploadPath);
-        }
+            String metadata_string = redisTemplate.opsForValue().get(eTag);
+            FileMetadata fileMetaData = objectMapper.readValue(metadata_string, FileMetadata.class);
+            String filePath=path+"/"+fileMetaData.getPath();
 
-        // Generate a unique name for the watermarked PDF
-        String watermarkedFileName = "watermarked_" + System.currentTimeMillis() + ".pdf";
-        String watermarkedFilePath = uploadPath.toString() + "/" + watermarkedFileName;
+            if (!filePath.contains(".pdf")) {
+                throw new IOException("File metadata not found for key: " + eTag);
+            }
 
-        // Open the original PDF document
-        try (PdfDocument originalPdf = new PdfDocument(new PdfReader(originalPdfFile));
-             PdfDocument watermarkedPdf = new PdfDocument(new PdfWriter(watermarkedFilePath))) {
 
-            try (Document document = new Document(watermarkedPdf)) {
-                // Loop through each page in the PDF
-                for (int i = 1; i <= originalPdf.getNumberOfPages(); i++) {
-                    PdfPage page = originalPdf.getPage(i).copyTo(watermarkedPdf);
-                    watermarkedPdf.addPage(page);
+            String originalPdfPath = filePath;
+            String newUuid = UUID.randomUUID().toString();
+            String watermarkedFileNameinDB = fileMetaData.getName().substring(0, fileMetaData.getName().lastIndexOf('.')) + "_watermarked.pdf";
+            String watermarkedFileName = newUuid + ".pdf";
+            String watermarkedFilePath = path + "/" + watermarkedFileName;
+            File originalPdfFile = new File(originalPdfPath);
 
-                    // Create the watermark paragraph with given opacity
-                    Paragraph watermark = new Paragraph(watermarkText)
-                            .setFontSize(60)
-                            .setOpacity(opacity) // Set the custom opacity
-                            .setRotationAngle(Math.toRadians(45)) // Rotate if desired
-                            .setTextAlignment(TextAlignment.CENTER);
+            try (PdfDocument originalPdf = new PdfDocument(new PdfReader(originalPdfFile));
+                 PdfDocument watermarkedPdf = new PdfDocument(new PdfWriter(watermarkedFilePath))) {
 
-                    // Position the watermark based on the specified location
-                    PageSize pageSize = (PageSize) page.getPageSize();
-                    float x = pageSize.getWidth() / 2;
-                    float y = pageSize.getHeight() / 2;
+                try (Document document = new Document(watermarkedPdf)) {
+                    // Loop through each page in the PDF
+                    for (int i = 1; i <= originalPdf.getNumberOfPages(); i++) {
+                        PdfPage page = originalPdf.getPage(i).copyTo(watermarkedPdf);
+                        watermarkedPdf.addPage(page);
 
-                    switch (position.toLowerCase()) {
-                        case "top-left":
-                            x = pageSize.getWidth() * 0.25f;
-                            y = pageSize.getHeight() * 0.75f;
-                            break;
-                        case "top-right":
-                            x = pageSize.getWidth() * 0.75f;
-                            y = pageSize.getHeight() * 0.75f;
-                            break;
-                        case "bottom-left":
-                            x = pageSize.getWidth() * 0.25f;
-                            y = pageSize.getHeight() * 0.25f;
-                            break;
-                        case "bottom-right":
-                            x = pageSize.getWidth() * 0.75f;
-                            y = pageSize.getHeight() * 0.25f;
-                            break;
-                        case "center":
-                        default:
-                            // Center position already set by default
-                            break;
+                        //change font size and angle later if feature is required.
+
+                        // Create the watermark paragraph with given opacity
+                        Paragraph watermark = new Paragraph(watermarkText)
+                                .setFontSize(60)
+                                .setOpacity(opacity) // Set the custom opacity
+                                .setRotationAngle(Math.toRadians(45)) // Rotate if desired
+                                .setTextAlignment(TextAlignment.CENTER);
+
+                        // Position the watermark based on the specified location
+                        PageSize pageSize = (PageSize) page.getPageSize();
+                        float x = pageSize.getWidth() / 2;
+                        float y = pageSize.getHeight() / 2;
+
+                        switch (position.toLowerCase()) {
+                            case "top-left":
+                                x = pageSize.getWidth() * 0.25f;
+                                y = pageSize.getHeight() * 0.75f;
+                                break;
+                            case "top-right":
+                                x = pageSize.getWidth() * 0.75f;
+                                y = pageSize.getHeight() * 0.75f;
+                                break;
+                            case "bottom-left":
+                                x = pageSize.getWidth() * 0.25f;
+                                y = pageSize.getHeight() * 0.25f;
+                                break;
+                            case "bottom-right":
+                                x = pageSize.getWidth() * 0.75f;
+                                y = pageSize.getHeight() * 0.25f;
+                                break;
+                            case "center":
+                            default:
+                                // Center position already set by default
+                                break;
+                        }
+
+                        // Show the watermark text aligned on the page at specified coordinates
+                        document.showTextAligned(watermark, x, y, i, TextAlignment.CENTER, VerticalAlignment.MIDDLE, 0);
                     }
-
-                    // Show the watermark text aligned on the page at specified coordinates
-                    document.showTextAligned(watermark, x, y, i, TextAlignment.CENTER, VerticalAlignment.MIDDLE, 0);
                 }
             }
+
+            UploadFileInternalRequest uploadFileInternalRequest = new UploadFileInternalRequest();
+            uploadFileInternalRequest.setPath(newUuid+ ".pdf");
+            uploadFileInternalRequest.setName(watermarkedFileNameinDB);
+            uploadFileInternalRequest.setOwner(fileMetaData.getOwner());
+            uploadFileInternalRequest.setUuid(newUuid);
+            uploadFileInternalRequest.setHash("hash");
+            uploadFileInternalRequest.setSize(1234);//any non-zero value should work as download handler doesnt actually check the size
+
+            String uploadFileInternalRequestJson = objectMapper.writeValueAsString(uploadFileInternalRequest);
+            System.out.println("uploadFileInternalRequestJson: " + uploadFileInternalRequestJson);
+            //Send POST request to the internal API to upload the merged PDF
+
+            String url = System.getenv("FILE_MICROSERVICE") + "/upload/internal";
+            HttpClient httpclient = HttpClientConfig.getClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(uploadFileInternalRequestJson))
+                    .build();
+            HttpResponse<String> response = httpclient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            System.out.println("Response code: " + response.statusCode());
+            System.out.println("Response body: " + response.body());
+            if (response.statusCode() != 200) {
+                throw new IOException("Error uploading watermarked PDF to file microservice");
+            }
+            outputeTags.add(newUuid);
         }
-
-        // Store the path of the watermarked PDF in Redis
-        String watermarkedMetadataKey = "watermarked_file:" + System.currentTimeMillis();
-        redisTemplate.opsForValue().set(watermarkedMetadataKey, watermarkedFilePath);
-
-        return watermarkedMetadataKey;
+        return outputeTags;
     }
 
 
