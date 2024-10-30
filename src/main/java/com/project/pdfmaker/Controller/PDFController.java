@@ -14,6 +14,13 @@ import java.util.*;
 import java.io.IOException;
 
 @RestController
+@CrossOrigin(
+        origins = "*",
+        methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE, RequestMethod.OPTIONS},
+        allowedHeaders = "*", // Allow all headers
+        exposedHeaders = "*", // Expose all headers
+        allowCredentials = "true" // Set to true if you want to allow credentials
+)
 @RequestMapping("/")
 public class PDFController {
 
