@@ -47,6 +47,9 @@ public class PDFService {
     @Value("${pdf.storage.path}")
     String path;
 
+    @Value("${file.microservice}")
+    String fileMicroservice;
+
     private ObjectMapper objectMapper = new ObjectMapper();
 
     // Method to merge multiple PDFs and save the merged PDF to the volume
@@ -125,7 +128,7 @@ public class PDFService {
         //_, err = http.Post(os.Getenv("FILE_MICROSERVICE")+"/upload/internal", "application/json", bytes.NewReader(payloadBytes))
 
 
-        String url = System.getenv("FILE_MICROSERVICE") + "/upload/internal";
+        String url = fileMicroservice + "/upload/internal";
         HttpClient httpclient = HttpClientConfig.getClient();
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(java.net.URI.create(url))
@@ -212,7 +215,7 @@ public class PDFService {
                 System.out.println("uploadFileInternalRequestJson: " + uploadFileInternalRequestJson);
                 //Send POST request to the internal API to upload the merged PDF
 
-                String url = System.getenv("FILE_MICROSERVICE") + "/upload/internal";
+                String url = fileMicroservice + "/upload/internal";
                 HttpClient httpclient = HttpClientConfig.getClient();
                 HttpRequest request = HttpRequest.newBuilder()
                         .uri(java.net.URI.create(url))
@@ -281,7 +284,7 @@ public class PDFService {
             System.out.println("uploadFileInternalRequestJson: " + uploadFileInternalRequestJson);
             //Send POST request to the internal API to upload the merged PDF
 
-            String url = System.getenv("FILE_MICROSERVICE") + "/upload/internal";
+            String url = fileMicroservice + "/upload/internal";
 
             HttpClient httpclient = HttpClientConfig.getClient();
 
@@ -334,7 +337,7 @@ public class PDFService {
                     String metadata_string = redisTemplate.opsForValue().get(etag);
                     FileMetadata fileMetaData = objectMapper.readValue(metadata_string, FileMetadata.class);
 
-                    String imagePath = path + fileMetaData.getPath();
+                    String imagePath = path +"/" +fileMetaData.getPath();
    
                     File imageFile = new File(imagePath);
                     if (!imageFile.exists()) {
@@ -351,7 +354,7 @@ public class PDFService {
             // Store the path of the generated PDF in Redis
 
             UploadFileInternalRequest uploadFileInternalRequest = new UploadFileInternalRequest();
-            uploadFileInternalRequest.setPath(pdfFilePath);
+            uploadFileInternalRequest.setPath(newUuid+ ".pdf");
             uploadFileInternalRequest.setName(pdfFileName);
             uploadFileInternalRequest.setOwner("owner");
             uploadFileInternalRequest.setUuid(newUuid);
@@ -362,7 +365,7 @@ public class PDFService {
             System.out.println("uploadFileInternalRequestJson: " + uploadFileInternalRequestJson);
             //Send POST request to the internal API to upload the merged PDF
 
-            String url = System.getenv("FILE_MICROSERVICE") + "/upload/internal";
+            String url = fileMicroservice + "/upload/internal";
             HttpClient httpclient = HttpClientConfig.getClient();
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(java.net.URI.create(url))
@@ -433,7 +436,7 @@ public class PDFService {
                     System.out.println("uploadFileInternalRequestJson: " + uploadFileInternalRequestJson);
                     //Send POST request to the internal API to upload the merged PDF
 
-                    String url = "http://localhost:3000" + "/upload/internal";
+                    String url = fileMicroservice + "/upload/internal";
                     HttpClient httpclient = HttpClientConfig.getClient();
                     HttpRequest request = HttpRequest.newBuilder()
                             .uri(java.net.URI.create(url))
@@ -551,7 +554,7 @@ public class PDFService {
             System.out.println("uploadFileInternalRequestJson: " + uploadFileInternalRequestJson);
             //Send POST request to the internal API to upload the merged PDF
 
-            String url = System.getenv("FILE_MICROSERVICE") + "/upload/internal";
+            String url = fileMicroservice + "/upload/internal";
             HttpClient httpclient = HttpClientConfig.getClient();
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(java.net.URI.create(url))
@@ -577,47 +580,119 @@ public class PDFService {
  
 
     // Method to add a view-only password to a PDF and save it to the volume
-    public String securePDF(String pdfMetadataKey, String userPassword) throws IOException {
-        // Retrieve the file path of the original PDF from Redis using the metadata key
-        String originalPdfPath = redisTemplate.opsForValue().get(pdfMetadataKey);
+    public List<String> securePDF(List<String> eTags, String userPassword) throws IOException, InterruptedException {
+        
+        List<String> outputeTags = new ArrayList<>();
+        
+        for (String eTag:eTags) {
+            String metadata_string = redisTemplate.opsForValue().get(eTag);
+            FileMetadata fileMetaData = objectMapper.readValue(metadata_string, FileMetadata.class);
+            String filePath=path+"/"+fileMetaData.getPath();
 
-        if (originalPdfPath == null || originalPdfPath.isEmpty()) {
-            throw new IOException("File metadata not found for key: " + pdfMetadataKey);
+            if (!filePath.contains(".pdf")) {
+                throw new IOException("File metadata not found for key: " + eTag);
+            }
+
+            File originalPdfFile = new File(filePath);
+            if (!originalPdfFile.exists()) {
+                throw new IOException("File not found on the volume: " + filePath);
+            }
+
+            // Define the upload path for saving the secured PDF
+            String newUuid = UUID.randomUUID().toString();
+            String securedFileName = newUuid + ".pdf";
+            String securedFilePath = path + "/" + securedFileName;
+
+            // Open the original PDF document, apply view-only encryption, and save it as a secured PDF
+            try (PdfReader reader = new PdfReader(originalPdfFile);
+                 PdfWriter writer = new PdfWriter(securedFilePath,
+                         new WriterProperties()
+                                 .setStandardEncryption(
+                                         userPassword.getBytes(),
+                                         null, // No owner password, only user password for view access
+                                         EncryptionConstants.ALLOW_PRINTING, // Allow only viewing without additional permissions
+                                         EncryptionConstants.ENCRYPTION_AES_256))) {
+                PdfDocument pdfDoc = new PdfDocument(reader, writer);
+                pdfDoc.close();
+            }
+
+            UploadFileInternalRequest uploadFileInternalRequest = getUploadFileInternalRequest(newUuid, fileMetaData);
+
+            String uploadFileInternalRequestJson = objectMapper.writeValueAsString(uploadFileInternalRequest);
+            System.out.println("uploadFileInternalRequestJson: " + uploadFileInternalRequestJson);
+            //Send POST request to the internal API to upload the merged PDF
+
+            String url = fileMicroservice + "/upload/internal";
+            HttpClient httpclient = HttpClientConfig.getClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(uploadFileInternalRequestJson))
+                    .build();
+            HttpResponse<String> response = httpclient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            System.out.println("Response code: " + response.statusCode());
+            System.out.println("Response body: " + response.body());
+            if (response.statusCode() != 200) {
+                throw new IOException("Error uploading secured PDF to file microservice");
+            }
+            outputeTags.add(newUuid);
         }
+        return outputeTags;
 
-        File originalPdfFile = new File(originalPdfPath);
-        if (!originalPdfFile.exists()) {
-            throw new IOException("File not found on the volume: " + originalPdfPath);
-        }
 
-        // Define the upload path for saving the secured PDF
-        Path uploadPath = Paths.get("/data/pdf-uploads/");
-        if (!Files.exists(uploadPath)) {
-            Files.createDirectories(uploadPath);
-        }
 
-        // Generate a unique file name for the secured PDF
-        String securedFileName = "secured_" + System.currentTimeMillis() + ".pdf";
-        String securedFilePath = uploadPath.toString() + "/" + securedFileName;
+//        // Retrieve the file path of the original PDF from Redis using the metadata key
+//        String originalPdfPath = redisTemplate.opsForValue().get(pdfMetadataKey);
+//
+//        if (originalPdfPath == null || originalPdfPath.isEmpty()) {
+//            throw new IOException("File metadata not found for key: " + pdfMetadataKey);
+//        }
+//
+//        File originalPdfFile = new File(originalPdfPath);
+//        if (!originalPdfFile.exists()) {
+//            throw new IOException("File not found on the volume: " + originalPdfPath);
+//        }
+//
+//        // Define the upload path for saving the secured PDF
+//        Path uploadPath = Paths.get("/data/pdf-uploads/");
+//        if (!Files.exists(uploadPath)) {
+//            Files.createDirectories(uploadPath);
+//        }
+//
+//        // Generate a unique file name for the secured PDF
+//        String securedFileName = "secured_" + System.currentTimeMillis() + ".pdf";
+//        String securedFilePath = uploadPath.toString() + "/" + securedFileName;
+//
+//        // Open the original PDF document, apply view-only encryption, and save it as a secured PDF
+//        try (PdfReader reader = new PdfReader(originalPdfFile);
+//             PdfWriter writer = new PdfWriter(securedFilePath,
+//                    new WriterProperties()
+//                        .setStandardEncryption(
+//                            userPassword.getBytes(),
+//                            null, // No owner password, only user password for view access
+//                            EncryptionConstants.ALLOW_PRINTING, // Allow only viewing without additional permissions
+//                            EncryptionConstants.ENCRYPTION_AES_256))) {
+//            PdfDocument pdfDoc = new PdfDocument(reader, writer);
+//            pdfDoc.close();
+//        }
+//
+//        // Store the secured PDF's path in Redis (e.g., key: "secured_file:123", value: file path)
+//        String securedMetadataKey = "secured_file:" + System.currentTimeMillis();
+//        redisTemplate.opsForValue().set(securedMetadataKey, securedFilePath);
+//
+//        return securedMetadataKey;
+    }
 
-        // Open the original PDF document, apply view-only encryption, and save it as a secured PDF
-        try (PdfReader reader = new PdfReader(originalPdfFile);
-             PdfWriter writer = new PdfWriter(securedFilePath,
-                    new WriterProperties()
-                        .setStandardEncryption(
-                            userPassword.getBytes(),
-                            null, // No owner password, only user password for view access
-                            EncryptionConstants.ALLOW_PRINTING, // Allow only viewing without additional permissions
-                            EncryptionConstants.ENCRYPTION_AES_256))) {
-            PdfDocument pdfDoc = new PdfDocument(reader, writer);
-            pdfDoc.close();
-        }
-
-        // Store the secured PDF's path in Redis (e.g., key: "secured_file:123", value: file path)
-        String securedMetadataKey = "secured_file:" + System.currentTimeMillis();
-        redisTemplate.opsForValue().set(securedMetadataKey, securedFilePath);
-
-        return securedMetadataKey;
+    private static UploadFileInternalRequest getUploadFileInternalRequest(String newUuid, FileMetadata fileMetaData) {
+        UploadFileInternalRequest uploadFileInternalRequest = new UploadFileInternalRequest();
+        uploadFileInternalRequest.setPath(newUuid + ".pdf");
+        uploadFileInternalRequest.setName(fileMetaData.getName().substring(0, fileMetaData.getName().lastIndexOf('.')) + "_secured.pdf");
+        uploadFileInternalRequest.setOwner(fileMetaData.getOwner());
+        uploadFileInternalRequest.setUuid(newUuid);
+        uploadFileInternalRequest.setHash("hash");
+        uploadFileInternalRequest.setSize(1234);//any non-zero value should work as download handler doesnt actually check the size
+        return uploadFileInternalRequest;
     }
 }
 

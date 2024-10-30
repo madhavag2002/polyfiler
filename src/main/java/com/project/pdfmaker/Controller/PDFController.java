@@ -17,6 +17,11 @@ import java.io.IOException;
 @RequestMapping("/")
 public class PDFController {
 
+    @GetMapping("/ping")
+    public String ping() {
+        return "Pong";
+    }
+
     @Autowired
     private PDFService pdfService;
 
@@ -28,6 +33,13 @@ public class PDFController {
     public ResponseEntity<List<String>> mergePDFsFromVolume(@RequestBody Map<String, Object> requestBody) {
         try {
             // Get the Redis metadata key from the PDFService
+
+            if (!requestBody.containsKey("etags")) {
+                return ResponseEntity.badRequest().body(Collections.singletonList("Please provide a list of eTags"));
+            }
+            if (!(requestBody.get("etags") instanceof ArrayList)) {
+                return ResponseEntity.badRequest().body(Collections.singletonList("Please provide a list of eTags what we recieved was "+ requestBody.get("etags").getClass().getName()));
+            }
             System.out.println(path);
         System.out.println(requestBody);
         System.out.println(requestBody.get("etaasfsgs"));
@@ -60,6 +72,13 @@ public class PDFController {
     public ResponseEntity<List<String>> splitPDF(@RequestBody Map<String, Object> requestBody) {
         try {
 
+            if (!requestBody.containsKey("etags")) {
+                return ResponseEntity.badRequest().body(Collections.singletonList("Please provide a list of eTags"));
+            }
+            if (!(requestBody.get("etags") instanceof ArrayList)) {
+                return ResponseEntity.badRequest().body(Collections.singletonList("Please provide a list of eTags what we recieved was "+ requestBody.get("etags").getClass().getName()));
+            }
+
             System.out.println(path);
             System.out.println(requestBody);
             System.out.println(requestBody.get("etaasfsgs"));
@@ -88,6 +107,12 @@ public class PDFController {
     @PostMapping(value = "/compress", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<List<String>>  compressPDF(@RequestBody Map<String, Object> requestBody) {
         try {
+            if (!requestBody.containsKey("etags")) {
+                return ResponseEntity.badRequest().body(Collections.singletonList("Please provide a list of eTags"));
+            }
+            if (!(requestBody.get("etags") instanceof ArrayList)) {
+                return ResponseEntity.badRequest().body(Collections.singletonList("Please provide a list of eTags what we recieved was "+ requestBody.get("etags").getClass().getName()));
+            }
             //String[] eTags = (String[]) requestBody.get("etags");
             ArrayList<String> eTags = (ArrayList<String>) requestBody.get("etags");
             Float compressionQuality = (Float) requestBody.get("compressionQuality");
@@ -111,6 +136,12 @@ public class PDFController {
     @PostMapping(value = "/convert-images-to-pdf", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<List<String>> convertImagesToPDF(@RequestBody Map<String, Object> requestBody) {
         try {
+            if (!requestBody.containsKey("etags")) {
+                return ResponseEntity.badRequest().body(Collections.singletonList("Please provide a list of eTags"));
+            }
+            if (!(requestBody.get("etags") instanceof ArrayList)) {
+                return ResponseEntity.badRequest().body(Collections.singletonList("Please provide a list of eTags what we recieved was "+ requestBody.get("etags").getClass().getName()));
+            }
                 ArrayList<String> eTags = (ArrayList<String>) requestBody.get("etags");
 
 
@@ -134,6 +165,12 @@ public class PDFController {
     public ResponseEntity<List<String>> convertPDFToImages(@RequestBody Map<String, Object> requestBody) {
         try {
 
+            if (!requestBody.containsKey("etags")) {
+                return ResponseEntity.badRequest().body(Collections.singletonList("Please provide a list of eTags"));
+            }
+            if (!(requestBody.get("etags") instanceof ArrayList)) {
+                return ResponseEntity.badRequest().body(Collections.singletonList("Please provide a list of eTags what we recieved was "+ requestBody.get("etags").getClass().getName()));
+            }
             ArrayList<String> eTags = (ArrayList<String>) requestBody.get("etags");
             if (eTags.size() != 1) {
                 return ResponseEntity.badRequest().body(Collections.singletonList("Please provide only one eTag"));
@@ -158,6 +195,12 @@ public class PDFController {
     @PostMapping(value = "/add-watermark", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<List<String>> addWatermarkToPDF(@RequestBody Map<String, Object> requestBody) {
         try {
+            if (!requestBody.containsKey("etags")) {
+                return ResponseEntity.badRequest().body(Collections.singletonList("Please provide a list of eTags"));
+            }
+            if (!(requestBody.get("etags") instanceof ArrayList)) {
+                return ResponseEntity.badRequest().body(Collections.singletonList("Please provide a list of eTags what we recieved was "+ requestBody.get("etags").getClass().getName()));
+            }
             ArrayList<String> eTags = (ArrayList<String>) requestBody.get("etags");
             String watermarkText = (String) requestBody.get("watermarkText");
             Float opacity = (Float) requestBody.get("opacity");
@@ -181,21 +224,28 @@ public class PDFController {
     
 
     // Endpoint to add a view-only password to a PDF and return the metadata key of the secured PDF
-    @GetMapping("/secure")
-    public ResponseEntity<String> securePDF(
-            @RequestParam("pdfMetadataKey") String pdfMetadataKey,
-            @RequestParam("userPassword") String userPassword) {
+    @PostMapping(value = "/secure", produces = MediaType.TEXT_PLAIN_VALUE, consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
+    public ResponseEntity<List<String>> securePDF(@RequestBody Map<String, Object> requestBody) {
         try {
+            if (!requestBody.containsKey("etags")) {
+                return ResponseEntity.badRequest().body(Collections.singletonList("Please provide a list of eTags"));
+            }
+            if (!(requestBody.get("etags") instanceof ArrayList)) {
+                return ResponseEntity.badRequest().body(Collections.singletonList("Please provide a list of eTags what we recieved was "+ requestBody.get("etags").getClass().getName()));
+            }
+            ArrayList<String> eTags = (ArrayList<String>) requestBody.get("etags");
+            String userPassword = (String) requestBody.get("userPassword");
+
             // Call the service method to secure the PDF with view-only access
-            String securedMetadataKey = pdfService.securePDF(pdfMetadataKey, userPassword);
+            List<String> securedMetadataKey = pdfService.securePDF(eTags, userPassword);
 
             // Return the metadata key of the secured PDF
             return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_TYPE, MediaType.TEXT_PLAIN_VALUE)
-                    .body("Secured PDF metadata key: " + securedMetadataKey);
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .body(securedMetadataKey);
 
-        } catch (IOException e) {
-            return ResponseEntity.internalServerError().body("Error securing PDF: " + e.getMessage());
+        } catch (IOException | InterruptedException e) {
+            return ResponseEntity.internalServerError().body(Collections.singletonList("Error securing PDF: " + e.getMessage()));
         }
     }
 }
