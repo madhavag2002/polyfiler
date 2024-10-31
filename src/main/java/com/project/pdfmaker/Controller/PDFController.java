@@ -15,7 +15,7 @@ import java.io.IOException;
 
 @RestController
 @CrossOrigin(
-        origins = "*",
+        origins = {"http://localhost:5173, https://polyfile.manojshivagange.tech, http://polyfile.manojshivagange.tech"},
         methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.DELETE, RequestMethod.OPTIONS},
         allowedHeaders = "*", // Allow all headers
         exposedHeaders = "*", // Expose all headers
@@ -122,7 +122,7 @@ public class PDFController {
             }
             //String[] eTags = (String[]) requestBody.get("etags");
             ArrayList<String> eTags = (ArrayList<String>) requestBody.get("etags");
-            Float compressionQuality = (Float) requestBody.get("compressionQuality");
+            Double compressionQuality = (Double) requestBody.get("compressionQuality");
             // Get the metadata key of the compressed PDF
             List<String> compressedMetadataKey = pdfService.compressPDF(eTags,compressionQuality);
 
@@ -210,10 +210,10 @@ public class PDFController {
             }
             ArrayList<String> eTags = (ArrayList<String>) requestBody.get("etags");
             String watermarkText = (String) requestBody.get("watermarkText");
-            Float opacity = (Float) requestBody.get("opacity");
+            Integer opacity = (Integer) requestBody.get("opacity");
             String position = (String) requestBody.get("position");
-            float fontSize = (Float) requestBody.get("fontSize");
-            float angle = (Float) requestBody.get("angle");
+            float fontSize = 0.0f;
+            float angle = 0.0f;
 
 
             // Call the service method with additional parameters for opacity and position
@@ -231,7 +231,7 @@ public class PDFController {
     
 
     // Endpoint to add a view-only password to a PDF and return the metadata key of the secured PDF
-    @PostMapping(value = "/secure", produces = MediaType.TEXT_PLAIN_VALUE, consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
+    @PostMapping(value = "/secure", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<List<String>> securePDF(@RequestBody Map<String, Object> requestBody) {
         try {
             if (!requestBody.containsKey("etags")) {
@@ -248,7 +248,6 @@ public class PDFController {
 
             // Return the metadata key of the secured PDF
             return ResponseEntity.ok()
-                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                     .body(securedMetadataKey);
 
         } catch (IOException | InterruptedException e) {

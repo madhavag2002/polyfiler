@@ -1,5 +1,7 @@
 package com.project.pdfmaker.Service;
 
+import com.itextpdf.kernel.colors.ColorConstants;
+import com.itextpdf.kernel.pdf.canvas.PdfCanvas;
 import com.project.pdfmaker.Service.FileMetadata;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.itextpdf.io.image.ImageDataFactory;
@@ -11,7 +13,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-
+import com.itextpdf.kernel.geom.Rectangle;
+import com.itextpdf.kernel.geom.PageSize;
 import com.itextpdf.kernel.geom.PageSize;
 import com.itextpdf.kernel.pdf.*;
 
@@ -115,7 +118,7 @@ public class PDFService {
         }
 
         UploadFileInternalRequest uploadFileInternalRequest = new UploadFileInternalRequest();
-        uploadFileInternalRequest.setPath(filePath);
+        uploadFileInternalRequest.setPath(mergedFileName);
         uploadFileInternalRequest.setName(first_etag_name_without_extension + "_merged.pdf");
         uploadFileInternalRequest.setOwner(first_etag_owner);
         uploadFileInternalRequest.setUuid(newUuid);
@@ -204,7 +207,7 @@ public class PDFService {
                 }
 
                 UploadFileInternalRequest uploadFileInternalRequest = new UploadFileInternalRequest();
-                uploadFileInternalRequest.setPath(splitFilePath);
+                uploadFileInternalRequest.setPath(mergedFileName);
                 uploadFileInternalRequest.setName(fileMetaData.getName().substring(0, fileMetaData.getName().lastIndexOf('.')) + "_page_" + i + ".pdf");
                 uploadFileInternalRequest.setOwner(fileMetaData.getOwner());
                 uploadFileInternalRequest.setUuid(newUuid);
@@ -240,7 +243,7 @@ public class PDFService {
     }
 
     // Method to compress a PDF and save the compressed PDF to the volume
-    public List<String> compressPDF(List<String> eTags , float compressionQuality) throws IOException, InterruptedException {
+    public List<String> compressPDF(List<String> eTags , double compressionQuality) throws IOException, InterruptedException {
         // Retrieve file path from Redis using metadata key
         //String originalFilePath = redisTemplate.opsForValue().get(metadataKey);
         List<String> outputeTag = new ArrayList<>();
@@ -468,7 +471,7 @@ public class PDFService {
 
 
     // Method to add a watermark to a PDF with customizable opacity and position, saving the edited PDF to the volume
-    public List<String> addWatermarkToPDF(List<String> eTags, String watermarkText, float opacity, String position, float fontSize, float angle) throws IOException, InterruptedException {
+    public List<String> addWatermarkToPDF(List<String> eTags, String watermarkText, int opacity, String position, float fontSize, float angle) throws IOException, InterruptedException {
 
         List<String> outputeTags = new ArrayList<>();
 
@@ -499,20 +502,22 @@ public class PDFService {
                         PdfPage page = originalPdf.getPage(i).copyTo(watermarkedPdf);
                         watermarkedPdf.addPage(page);
 
-                        //change font size and angle later if feature is required.
+                        // Create a new canvas that wraps the old content with save/restore
+                        PdfCanvas canvas = new PdfCanvas(page, true); // true wraps the old content
 
                         // Create the watermark paragraph with given opacity
                         Paragraph watermark = new Paragraph(watermarkText)
-                                .setFontSize(60)
-                                .setOpacity(opacity) // Set the custom opacity
-                                .setRotationAngle(Math.toRadians(45)) // Rotate if desired
+                                .setFontSize(70)
+                                .setOpacity(opacity / 100f) // Ensure opacity is a value between 0 and 1
+                                .setRotationAngle(Math.toRadians(0)) // Rotate if desired
                                 .setTextAlignment(TextAlignment.CENTER);
 
-                        // Position the watermark based on the specified location
-                        PageSize pageSize = (PageSize) page.getPageSize();
+                        // Get the page size as a Rectangle
+                        Rectangle pageSize = page.getPageSize();
                         float x = pageSize.getWidth() / 2;
                         float y = pageSize.getHeight() / 2;
 
+                        // Position the watermark based on the specified location
                         switch (position.toLowerCase()) {
                             case "top-left":
                                 x = pageSize.getWidth() * 0.25f;
@@ -537,8 +542,13 @@ public class PDFService {
                         }
 
                         // Show the watermark text aligned on the page at specified coordinates
-                        document.showTextAligned(watermark, x, y, i, TextAlignment.CENTER, VerticalAlignment.MIDDLE, 0);
+                        canvas.saveState(); // Save the current graphics state
+                        canvas.setFillColor(ColorConstants.GRAY); // Set color if needed (optional)
+                        document.showTextAligned(watermark, x, y, i, TextAlignment.CENTER, VerticalAlignment.MIDDLE, (float) Math.toRadians(45));
+                        canvas.restoreState(); // Restore the graphics state after adding the watermark
                     }
+
+
                 }
             }
 
